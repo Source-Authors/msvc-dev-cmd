@@ -1,11 +1,11 @@
-const core = require('@actions/core')
-const child_process = require('child_process')
-const fs = require('fs')
-const path = require('path')
-const process = require('process')
+import { warning, info, debug, startGroup, exportVariable, endGroup } from '@actions/core'
+import { execSync } from 'child_process'
+import { existsSync } from 'fs'
+import { delimiter } from 'path'
+import { env, platform } from 'process'
 
-const PROGRAM_FILES_X86 = process.env['ProgramFiles(x86)']
-const PROGRAM_FILES = [process.env['ProgramFiles(x86)'], process.env['ProgramFiles']]
+const PROGRAM_FILES_X86 = env['ProgramFiles(x86)']
+const PROGRAM_FILES = [env['ProgramFiles(x86)'], env['ProgramFiles']]
 
 
 const EDITIONS = ['Enterprise', 'Professional', 'Community', 'BuildTools']
@@ -29,7 +29,8 @@ function vsversion_to_versionnumber(vsversion) {
     }
     return vsversion
 }
-exports.vsversion_to_versionnumber = vsversion_to_versionnumber
+const _vsversion_to_versionnumber = vsversion_to_versionnumber
+export { _vsversion_to_versionnumber as vsversion_to_versionnumber }
 
 function vsversion_to_year(vsversion) {
     if (Object.keys(VsYearVersion).includes(vsversion)) {
@@ -43,20 +44,22 @@ function vsversion_to_year(vsversion) {
     }
     return vsversion
 }
-exports.vsversion_to_year = vsversion_to_year
+const _vsversion_to_year = vsversion_to_year
+export { _vsversion_to_year as vsversion_to_year }
 
 const VSWHERE_PATH = `${PROGRAM_FILES_X86}\\Microsoft Visual Studio\\Installer`
 
 function findWithVswhere(pattern, version_pattern) {
     try {
-        let installationPath = child_process.execSync(`vswhere -products * ${version_pattern} -prerelease -property installationPath`).toString().trim()
+        let installationPath = execSync(`vswhere -products * ${version_pattern} -prerelease -property installationPath`).toString().trim()
         return installationPath + '\\' + pattern
     } catch (e) {
-        core.warning(`vswhere failed: ${e}`)
+        warning(`vswhere failed: ${e}`)
     }
     return null
 }
-exports.findWithVswhere = findWithVswhere
+const _findWithVswhere = findWithVswhere
+export { _findWithVswhere as findWithVswhere }
 
 function findVcvarsall(vsversion) {
     const vsversion_number = vsversion_to_versionnumber(vsversion)
@@ -70,11 +73,11 @@ function findVcvarsall(vsversion) {
 
     // If vswhere is available, ask it about the location of the latest Visual Studio.
     let path = findWithVswhere('VC\\Auxiliary\\Build\\vcvarsall.bat', version_pattern)
-    if (path && fs.existsSync(path)) {
-        core.info(`Found with vswhere: ${path}`)
+    if (path && existsSync(path)) {
+        info(`Found with vswhere: ${path}`)
         return path
     }
-    core.info("Not found with vswhere")
+    info("Not found with vswhere")
 
     // If that does not work, try the standard installation locations,
     // starting with the latest and moving to the oldest.
@@ -83,27 +86,28 @@ function findVcvarsall(vsversion) {
         for (const ver of years) {
             for (const ed of EDITIONS) {
                 path = `${prog_files}\\Microsoft Visual Studio\\${ver}\\${ed}\\VC\\Auxiliary\\Build\\vcvarsall.bat`
-                core.info(`Trying standard location: ${path}`)
-                if (fs.existsSync(path)) {
-                    core.info(`Found standard location: ${path}`)
+                info(`Trying standard location: ${path}`)
+                if (existsSync(path)) {
+                    info(`Found standard location: ${path}`)
                     return path
                 }
             }
         }
     }
-    core.info("Not found in standard locations")
+    info("Not found in standard locations")
 
     // Special case for Visual Studio 2015 (and maybe earlier), try it out too.
     path = `${PROGRAM_FILES_X86}\\Microsoft Visual C++ Build Tools\\vcbuildtools.bat`
-    if (fs.existsSync(path)) {
-        core.info(`Found VS 2015: ${path}`)
+    if (existsSync(path)) {
+        info(`Found VS 2015: ${path}`)
         return path
     }
-    core.info(`Not found in VS 2015 location: ${path}`)
+    info(`Not found in VS 2015 location: ${path}`)
 
     throw new Error('Microsoft Visual Studio not found')
 }
-exports.findVcvarsall = findVcvarsall
+const _findVcvarsall = findVcvarsall
+export { _findVcvarsall as findVcvarsall }
 
 function isPathVariable(name) {
     const pathLikeVariables = ['PATH', 'INCLUDE', 'LIB', 'LIBPATH']
@@ -122,13 +126,13 @@ function filterPathValue(path) {
 
 /** See https://github.com/ilammy/msvc-dev-cmd#inputs */
 function setupMSVCDevCmd(arch, sdk, toolset, uwp, spectre, vsversion) {
-    if (process.platform != 'win32') {
-        core.info('This is not a Windows virtual environment, bye!')
+    if (platform != 'win32') {
+        info('This is not a Windows virtual environment, bye!')
         return
     }
 
     // Add standard location of "vswhere" to PATH, in case it's not there.
-    process.env.PATH += path.delimiter + VSWHERE_PATH
+    env.PATH += delimiter + VSWHERE_PATH
 
     // There are all sorts of way the architectures are called. In addition to
     // values supported by Microsoft Visual C++, recognize some common aliases.
@@ -161,9 +165,9 @@ function setupMSVCDevCmd(arch, sdk, toolset, uwp, spectre, vsversion) {
     }
 
     const vcvars = `"${findVcvarsall(vsversion)}" ${args.join(' ')}`
-    core.debug(`vcvars command-line: ${vcvars}`)
+    debug(`vcvars command-line: ${vcvars}`)
 
-    const cmd_output_string = child_process.execSync(`set && cls && ${vcvars} && cls && set`, {shell: "cmd"}).toString()
+    const cmd_output_string = execSync(`set && cls && ${vcvars} && cls && set`, {shell: "cmd"}).toString()
     const cmd_output_parts = cmd_output_string.split('\f')
 
     const old_environment = cmd_output_parts[0].split('\r\n')
@@ -196,7 +200,7 @@ function setupMSVCDevCmd(arch, sdk, toolset, uwp, spectre, vsversion) {
     // Now look at the new environment and export everything that changed.
     // These are the variables set by vsvars.bat. Also export everything
     // that was not there during the first sweep: those are new variables.
-    core.startGroup('Environment variables')
+    startGroup('Environment variables')
     for (let string of new_environment) {
         // vsvars.bat likes to print some fluff at the beginning.
         // Skip lines that don't look like environment variables.
@@ -207,7 +211,7 @@ function setupMSVCDevCmd(arch, sdk, toolset, uwp, spectre, vsversion) {
         let old_value = old_env_vars[name]
         // For new variables "old_value === undefined".
         if (new_value !== old_value) {
-            core.info(`Setting ${name}`)
+            info(`Setting ${name}`)
             // Special case for a bunch of PATH-like variables: vcvarsall.bat
             // just prepends its stuff without checking if its already there.
             // This makes repeated invocations of this action fail after some
@@ -215,11 +219,12 @@ function setupMSVCDevCmd(arch, sdk, toolset, uwp, spectre, vsversion) {
             if (isPathVariable(name)) {
                 new_value = filterPathValue(new_value)
             }
-            core.exportVariable(name, new_value)
+            exportVariable(name, new_value)
         }
     }
-    core.endGroup()
+    endGroup()
 
-    core.info(`Configured Developer Command Prompt`)
+    info(`Configured Developer Command Prompt`)
 }
-exports.setupMSVCDevCmd = setupMSVCDevCmd
+const _setupMSVCDevCmd = setupMSVCDevCmd
+export { _setupMSVCDevCmd as setupMSVCDevCmd }
